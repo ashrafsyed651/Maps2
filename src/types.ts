@@ -1,3 +1,5 @@
+/// <reference types="google.maps" />
+
 export type RoadType = 'Highway' | 'City' | 'Scenic' | 'Backroads';
 
 export interface Route {
@@ -10,7 +12,8 @@ export interface Route {
     lightingScore: number; // 0-10
     roadType: RoadType;
     description: string;
-    geometry?: string; // Encoded polyline from OSRM
+    // Store the underlying Google Maps direction route object for rendering
+    googleRoute?: google.maps.DirectionsRoute;
 }
 
 export type ProfileId = 'fast' | 'safe' | 'scenic' | 'balanced';

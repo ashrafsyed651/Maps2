@@ -1,23 +1,5 @@
 import { Route, DrivingProfile } from '../types';
-
-interface OSRMResponse {
-    routes: Array<{
-        duration: number; // seconds
-        distance: number; // meters
-        geometry: string; // polyline
-        legs: Array<{
-            steps: Array<{
-                name: string;
-                duration: number;
-                distance: number;
-                // OSRM provides more, but this is enough for heuristics
-            }>
-        }>
-    }>;
-}
-
-// OSRM public demo server (respect usage limits!)
-const OSRM_API_BASE = 'https://router.project-osrm.org/route/v1/driving';
+import { fetchLightingScore } from './osmService';
 
 export const PROFILES: DrivingProfile[] = [
     {
@@ -43,73 +25,86 @@ export const PROFILES: DrivingProfile[] = [
     }
 ];
 
-export const fetchRoutes = async (sourceCoords: { lat: string, lon: string }, destCoords: { lat: string, lon: string }): Promise<Route[]> => {
+export const fetchRoutes = async (sourceCoords: { lat: number, lon: number }, destCoords: { lat: number, lon: number }): Promise<Route[]> => {
+    if (!window.google || !window.google.maps) {
+        throw new Error("Google Maps API not loaded");
+    }
+
+    const directionsService = new google.maps.DirectionsService();
+
     try {
-        // Request multiple alternatives
-        const url = `${OSRM_API_BASE}/${sourceCoords.lon},${sourceCoords.lat};${destCoords.lon},${destCoords.lat}?overview=full&alternatives=3&steps=true`;
+        const response = await directionsService.route({
+            origin: { lat: sourceCoords.lat, lng: sourceCoords.lon },
+            destination: { lat: destCoords.lat, lng: destCoords.lon },
+            travelMode: google.maps.TravelMode.DRIVING,
+            provideRouteAlternatives: true
+        });
 
-        const response = await fetch(url);
-        const data: OSRMResponse = await response.json();
-
-        if (!data.routes || data.routes.length === 0) {
+        if (!response.routes || response.routes.length === 0) {
             return [];
         }
 
-        // Map OSRM routes to our Route interface with heuristics
-        return data.routes.map((osrmRoute, index) => {
-            // Heuristics based on available data
-            const durationMins = Math.round(osrmRoute.duration / 60);
-            const distanceKm = Number((osrmRoute.distance / 1000).toFixed(1));
+        const processedRoutes = await Promise.all(response.routes.map(async (gRoute, index) => {
+            const leg = gRoute.legs && gRoute.legs[0];
+            const durationMins = leg?.duration?.value ? Math.round(leg.duration.value / 60) : 0;
+            const distanceKm = leg?.distance?.value ? Number((leg.distance.value / 1000).toFixed(1)) : 0;
 
-            // Randomize "road type" and scores slightly based on index (simulating different paths)
-            // In a real app we'd analyze osrmRoute.legs[0].steps for highway tags.
-            let roadType: Route['roadType'] = 'City';
-            let activity = 5;
-            let lighting = 5;
-
-            // Apply some "fake" characteristics based on duration/distance differences
-            // Longer routes = usually scenic or backroads
-            // Shorter routes = highway/city
-
-            const isLongest = index === data.routes.length - 1;
-            const isShortest = index === 0;
-
-            if (isShortest) {
+            let roadType: Route['roadType'];
+            if (index === 0) {
                 roadType = 'Highway';
-                activity = 3;
-                lighting = 8;
-            } else if (isLongest) {
+            } else if (durationMins > (response.routes[0].legs?.[0]?.duration?.value || 0) / 60 * 1.2) {
                 roadType = 'Scenic';
-                activity = 7;
-                lighting = 4;
             } else {
                 roadType = 'Backroads';
-                activity = 5;
-                lighting = 5;
             }
 
+            let activity = 5;
+            if (roadType === 'Highway') activity = 4;
+            if (roadType === 'Scenic') activity = 8;
+            if (roadType === 'Backroads') activity = 6;
+
+            let lightingScore = 5;
+            if (gRoute.overview_path) {
+                lightingScore = await fetchLightingScore(gRoute.overview_path as any);
+            }
+
+            // STABLE ID: Based on source/destination names and route summary if available
+            // This prevents UI refreshes from resetting the selection state unnecessarily
+            const stableId = `route-${leg?.start_address.slice(0, 3)}-${leg?.end_address.slice(0, 3)}-${index}`;
+
             return {
-                id: `route-${index}`,
-                source: 'Start', // Updated by App UI usually
-                destination: 'End',
+                id: stableId,
+                source: leg?.start_address || 'Start',
+                destination: leg?.end_address || 'End',
                 eta: durationMins,
                 distance: distanceKm,
                 activityScore: activity,
-                lightingScore: lighting,
-                roadType,
-                description: `Via ${osrmRoute.legs[0]?.steps[0]?.name || 'unnamed road'}`,
-                geometry: osrmRoute.geometry
+                lightingScore: lightingScore,
+                roadType: roadType,
+                description: gRoute.summary || leg?.start_address || 'Route',
+                googleRoute: gRoute
             };
-        });
+        }));
+
+        return processedRoutes;
 
     } catch (error) {
-        console.error("OSRM Fetch failed", error);
+        console.error("Direction/OSM Fetch failed", error);
         return [];
     }
 };
 
 export const rankRoutes = (routes: Route[], profile: DrivingProfile): Route[] => {
     return [...routes].sort((a, b) => {
+        if (profile.id === 'fast') return a.eta - b.eta;
+        if (profile.id === 'scenic') return b.eta - a.eta;
+        if (profile.id === 'safe') {
+            const safetyA = a.activityScore + a.lightingScore;
+            const safetyB = b.activityScore + b.lightingScore;
+            // If safety is tied, prefer shorter ETA
+            if (safetyB === safetyA) return a.eta - b.eta;
+            return safetyB - safetyA;
+        }
         const scoreA = calculateScore(a, profile);
         const scoreB = calculateScore(b, profile);
         return scoreB - scoreA;
@@ -117,16 +112,18 @@ export const rankRoutes = (routes: Route[], profile: DrivingProfile): Route[] =>
 };
 
 const calculateScore = (route: Route, profile: DrivingProfile): number => {
-    const etaScore = (120 - route.eta) * profile.weights.eta;
-    const activityScore = route.activityScore * 10 * profile.weights.activity;
-    const lightingScore = route.lightingScore * 10 * profile.weights.lighting;
-
+    const etaScore = (200 - route.eta) * (profile.weights?.eta || 1);
+    const activityScore = route.activityScore * 10 * (profile.weights?.activity || 1);
+    const lightingScore = route.lightingScore * 10 * (profile.weights?.lighting || 1);
     return etaScore + activityScore + lightingScore;
 };
 
 export const getRecommendationReason = (route: Route, profile: DrivingProfile): string => {
-    if (profile.id === 'fast') return `Fastest option: ${route.eta} mins.`;
-    if (profile.id === 'safe') return `Best lighting (${route.lightingScore}/10) and activity.`;
-    if (profile.id === 'scenic') return `High activity score (${route.activityScore}/10) for exploration.`;
+    if (profile.id === 'fast') return `Shortest route: ${route.eta} mins.`;
+    if (profile.id === 'scenic') return `Longest scenic drive: ${route.eta} mins.`;
+    if (profile.id === 'safe') {
+        const totalSafety = route.activityScore + route.lightingScore;
+        return `High safety score (${totalSafety}/20).`;
+    }
     return 'Balanced choice.';
 };
