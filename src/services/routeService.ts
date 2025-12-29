@@ -1,5 +1,6 @@
 import { Route, DrivingProfile } from '../types';
 import { fetchLightingScore } from './osmService';
+import { fetchRouteWeather } from './weatherService';
 
 export const PROFILES: DrivingProfile[] = [
     {
@@ -64,8 +65,23 @@ export const fetchRoutes = async (sourceCoords: { lat: number, lon: number }, de
             if (roadType === 'Backroads') activity = 6;
 
             let lightingScore = 5;
+            let weatherData = undefined;
+
             if (gRoute.overview_path) {
+                // Fetch basic lighting score
                 lightingScore = await fetchLightingScore(gRoute.overview_path as any);
+
+                // Fetch weather data
+                try {
+                    const pathForWeather = gRoute.overview_path.map(p => ({ lat: p.lat(), lng: p.lng() }));
+                    weatherData = await fetchRouteWeather(
+                        { lat: sourceCoords.lat, lng: sourceCoords.lon },
+                        { lat: destCoords.lat, lng: destCoords.lon },
+                        pathForWeather
+                    );
+                } catch (e) {
+                    console.warn("Weather fetch failed", e);
+                }
             }
 
             // STABLE ID: Based on source/destination names and route summary if available
@@ -80,6 +96,7 @@ export const fetchRoutes = async (sourceCoords: { lat: number, lon: number }, de
                 distance: distanceKm,
                 activityScore: activity,
                 lightingScore: lightingScore,
+                weather: weatherData,
                 roadType: roadType,
                 description: gRoute.summary || leg?.start_address || 'Route',
                 googleRoute: gRoute

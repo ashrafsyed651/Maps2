@@ -1,4 +1,4 @@
-interface LatLng {
+export interface LatLng {
     lat: number;
     lng: number;
 }
@@ -196,3 +196,74 @@ function samplePoints(path: LatLng[], count: number): LatLng[] {
 
     return samples;
 }
+
+export interface CityResult {
+    name: string;
+    lat: number;
+    lng: number;
+}
+
+/**
+ * Finds major cities or towns along the route using OSM Overpass API
+ */
+export const findCitiesAlongRoute = async (path: LatLng[]): Promise<CityResult[]> => {
+    if (!path || path.length === 0) return [];
+
+    // Sample 5 points along the route (skip start/end to avoid redundancy)
+    let samples = samplePoints(path, 7);
+    // Remove first and last to avoid origin/destination
+    if (samples.length > 2) {
+        samples = samples.slice(1, samples.length - 1);
+    }
+
+    // Build query for cities/towns around these points
+    let queryParts = "";
+    samples.forEach(pt => {
+        const lat = Number(pt.lat.toFixed(4));
+        const lng = Number(pt.lng.toFixed(4));
+        // Search for cities/towns within 10km (10000m)
+        queryParts += `node["place"~"city|town"](around:10000,${lat},${lng});`;
+    });
+
+    const query = `
+        [out:json][timeout:15];
+        (
+            ${queryParts}
+        );
+        out body;
+    `;
+
+    try {
+        const response = await fetch(OVERPASS_API_URL, {
+            method: 'POST',
+            body: query
+        });
+
+        if (!response.ok) return [];
+
+        const data = await response.json();
+        const elements = data.elements || [];
+
+        // Deduplicate and format
+        const uniqueCities = new Map<string, CityResult>();
+
+        elements.forEach((el: any) => {
+            if (el.tags && el.tags.name) {
+                // English name preferred if available
+                const name = el.tags['name:en'] || el.tags.name;
+                uniqueCities.set(name, {
+                    name: name,
+                    lat: el.lat,
+                    lng: el.lon
+                });
+            }
+        });
+
+        // Convert to array and limit to 3 distinct cities
+        return Array.from(uniqueCities.values()).slice(0, 3);
+
+    } catch (error) {
+        console.error("Failed to find cities along route:", error);
+        return [];
+    }
+};

@@ -1,7 +1,6 @@
-
 import { Route, DrivingProfile } from '../types';
 import { getRecommendationReason } from '../services/routeService';
-import { Timer, Zap, Lightbulb, TrendingUp, Award } from 'lucide-react';
+import { Timer, Zap, Lightbulb, TrendingUp, Award, Sun, Cloud, CloudRain, Snowflake, CloudLightning } from 'lucide-react';
 import { clsx } from 'clsx';
 
 interface RouteListProps {
@@ -9,6 +8,16 @@ interface RouteListProps {
     selectedProfile: DrivingProfile;
     selectedRouteId?: string;
     onSelectRoute?: (id: string) => void;
+}
+
+function getWeatherIcon(code: number) {
+    if (code <= 1) return <Sun size={14} className="text-orange-500" />;
+    if (code <= 3) return <Cloud size={14} className="text-gray-500" />;
+    if (code <= 48) return <Cloud size={14} className="text-slate-500" />;
+    if (code <= 67 || (code >= 80 && code <= 82)) return <CloudRain size={14} className="text-blue-500" />;
+    if (code <= 77) return <Snowflake size={14} className="text-cyan-500" />;
+    if (code >= 95) return <CloudLightning size={14} className="text-purple-500" />;
+    return <Sun size={14} className="text-orange-500" />;
 }
 
 export function RouteList({ routes, selectedProfile, selectedRouteId, onSelectRoute }: RouteListProps) {
@@ -118,6 +127,52 @@ export function RouteList({ routes, selectedProfile, selectedRouteId, onSelectRo
                                     </div>
                                 </div>
                             </div>
+
+                            {/* Weather Info */}
+                            {route.weather && (
+                                <div className="mb-4">
+                                    <h5 className="text-[10px] text-gray-400 font-bold mb-2 uppercase tracking-wider">Weather Conditions</h5>
+                                    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-gray-200">
+                                        {/* Origin */}
+                                        <div className="flex flex-col items-center p-2 bg-slate-50 rounded-xl border border-slate-100 min-w-[70px] flex-shrink-0">
+                                            <span className="text-[10px] text-gray-400 font-bold mb-1 truncate max-w-full">Origin</span>
+                                            <div className="flex items-center gap-1.5">
+                                                {getWeatherIcon(route.weather.origin.code)}
+                                                <span className="text-xs font-bold text-gray-700">{route.weather.origin.temp}°</span>
+                                            </div>
+                                        </div>
+
+                                        {/* Cities along route */}
+                                        {route.weather.waypoints && route.weather.waypoints.length > 0 ? (
+                                            route.weather.waypoints.map((wp, idx) => (
+                                                <div key={idx} className="flex flex-col items-center p-2 bg-slate-50 rounded-xl border border-slate-100 min-w-[80px] flex-shrink-0">
+                                                    <span className="text-[10px] text-zinc-500 font-semibold mb-1 truncate max-w-[75px]" title={wp.name}>
+                                                        {wp.name.split(',')[0]}
+                                                    </span>
+                                                    <div className="flex items-center gap-1.5">
+                                                        {getWeatherIcon(wp.data.code)}
+                                                        <span className="text-xs font-bold text-gray-700">{wp.data.temp}°</span>
+                                                    </div>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div className="flex flex-col items-center p-2 bg-slate-50 rounded-xl border border-slate-100 min-w-[70px] flex-shrink-0">
+                                                <span className="text-[10px] text-gray-400 font-bold mb-1">Route</span>
+                                                <span className="text-xs text-gray-400">--</span>
+                                            </div>
+                                        )}
+
+                                        {/* Destination */}
+                                        <div className="flex flex-col items-center p-2 bg-slate-50 rounded-xl border border-slate-100 min-w-[70px] flex-shrink-0">
+                                            <span className="text-[10px] text-gray-400 font-bold mb-1 truncate max-w-full">Dest</span>
+                                            <div className="flex items-center gap-1.5">
+                                                {getWeatherIcon(route.weather.destination.code)}
+                                                <span className="text-xs font-bold text-gray-700">{route.weather.destination.temp}°</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Recommendation Reason */}
                             <div className="bg-gradient-to-r from-blue-50/50 to-indigo-50/50 rounded-xl p-3 border border-blue-100">
