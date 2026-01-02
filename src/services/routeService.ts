@@ -26,7 +26,7 @@ export const PROFILES: DrivingProfile[] = [
     }
 ];
 
-export const fetchRoutes = async (sourceCoords: { lat: number, lon: number }, destCoords: { lat: number, lon: number }): Promise<Route[]> => {
+export const fetchRoutes = async (sourceCoords: { lat: number, lon: number }, destCoords: { lat: number, lon: number }, travelTime?: string, travelDate?: string): Promise<Route[]> => {
     if (!window.google || !window.google.maps) {
         throw new Error("Google Maps API not loaded");
     }
@@ -77,7 +77,9 @@ export const fetchRoutes = async (sourceCoords: { lat: number, lon: number }, de
                     weatherData = await fetchRouteWeather(
                         { lat: sourceCoords.lat, lng: sourceCoords.lon },
                         { lat: destCoords.lat, lng: destCoords.lon },
-                        pathForWeather
+                        pathForWeather,
+                        travelDate,
+                        travelTime
                     );
                 } catch (e) {
                     console.warn("Weather fetch failed", e);
@@ -111,34 +113,55 @@ export const fetchRoutes = async (sourceCoords: { lat: number, lon: number }, de
     }
 };
 
-export const rankRoutes = (routes: Route[], profile: DrivingProfile): Route[] => {
+export const rankRoutes = (routes: Route[], profile: DrivingProfile, travelTime: string = "20:00"): Route[] => {
+    const isDay = isDaytime(travelTime);
+
+    // Adjust weights based on time of day
+    const effectiveWeights = { ...profile.weights };
+    if (isDay) {
+        effectiveWeights.lighting = 0; // Ignore lighting during the day
+    }
+
     return [...routes].sort((a, b) => {
         if (profile.id === 'fast') return a.eta - b.eta;
         if (profile.id === 'scenic') return b.eta - a.eta;
         if (profile.id === 'safe') {
-            const safetyA = a.activityScore + a.lightingScore;
-            const safetyB = b.activityScore + b.lightingScore;
+            // Day: Activity only. Night: Activity + Lighting
+            const safetyA = a.activityScore * effectiveWeights.activity + a.lightingScore * effectiveWeights.lighting;
+            const safetyB = b.activityScore * effectiveWeights.activity + b.lightingScore * effectiveWeights.lighting;
+
             // If safety is tied, prefer shorter ETA
             if (safetyB === safetyA) return a.eta - b.eta;
             return safetyB - safetyA;
         }
-        const scoreA = calculateScore(a, profile);
-        const scoreB = calculateScore(b, profile);
+        const scoreA = calculateScore(a, effectiveWeights);
+        const scoreB = calculateScore(b, effectiveWeights);
         return scoreB - scoreA;
     });
 };
 
-const calculateScore = (route: Route, profile: DrivingProfile): number => {
-    const etaScore = (200 - route.eta) * (profile.weights?.eta || 1);
-    const activityScore = route.activityScore * 10 * (profile.weights?.activity || 1);
-    const lightingScore = route.lightingScore * 10 * (profile.weights?.lighting || 1);
+const isDaytime = (time: string): boolean => {
+    if (!time) return false;
+    const hour = parseInt(time.split(':')[0], 10);
+    return hour >= 6 && hour < 19; // 6 AM to 7 PM
+};
+
+const calculateScore = (route: Route, weights: { eta: number, activity: number, lighting: number }): number => {
+    const etaScore = (200 - route.eta) * (weights.eta || 1);
+    const activityScore = route.activityScore * 10 * (weights.activity || 1);
+    // Lighting score logic is now controlled by the weights passed in
+    const lightingScore = route.lightingScore * 10 * (weights.lighting || 1);
     return etaScore + activityScore + lightingScore;
 };
 
-export const getRecommendationReason = (route: Route, profile: DrivingProfile): string => {
+export const getRecommendationReason = (route: Route, profile: DrivingProfile, travelTime: string = "20:00"): string => {
     if (profile.id === 'fast') return `Shortest route: ${route.eta} mins.`;
     if (profile.id === 'scenic') return `Longest scenic drive: ${route.eta} mins.`;
     if (profile.id === 'safe') {
+        const isDay = isDaytime(travelTime);
+        if (isDay) {
+            return `High activity score (Daytime safety).`;
+        }
         const totalSafety = route.activityScore + route.lightingScore;
         return `High safety score (${totalSafety}/20).`;
     }

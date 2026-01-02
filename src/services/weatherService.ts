@@ -31,18 +31,54 @@ const getWeatherDescription = (code: number): string => {
     return WMO_CODES[code] || "Unknown";
 };
 
-const fetchPointWeather = async (lat: number, lng: number): Promise<WeatherData> => {
+const fetchPointWeather = async (lat: number, lng: number, date?: string, time?: string): Promise<WeatherData> => {
     try {
-        const response = await fetch(`${WEATHER_API_URL}?latitude=${lat}&longitude=${lng}&current_weather=true`);
+        let url = `${WEATHER_API_URL}?latitude=${lat}&longitude=${lng}`;
+
+        // If date is provided, use hourly forecast for that specific day
+        if (date) {
+            url += `&hourly=temperature_2m,weathercode&start_date=${date}&end_date=${date}`;
+        } else {
+            url += `&current_weather=true`;
+        }
+
+        const response = await fetch(url);
         if (!response.ok) throw new Error("Weather API failed");
 
         const data = await response.json();
-        const current = data.current_weather;
+
+        let temp = 0;
+        let code = 0;
+
+        if (date && time && data.hourly) {
+            // Find the closest hour index
+            const targetHour = parseInt(time.split(':')[0], 10);
+            const times = data.hourly.time as string[];
+
+            // OpenMeteo returns ISO strings like "2023-12-25T14:00"
+            // We just need to match the hour part
+            const index = times.findIndex(t => {
+                const h = new Date(t).getHours();
+                return h === targetHour;
+            });
+
+            if (index !== -1) {
+                temp = data.hourly.temperature_2m[index];
+                code = data.hourly.weathercode[index];
+            } else {
+                // Fallback to first available if match fails
+                temp = data.hourly.temperature_2m[0];
+                code = data.hourly.weathercode[0];
+            }
+        } else if (data.current_weather) {
+            temp = data.current_weather.temperature;
+            code = data.current_weather.weathercode;
+        }
 
         return {
-            temp: current.temperature,
-            code: current.weathercode,
-            description: getWeatherDescription(current.weathercode)
+            temp: temp,
+            code: code,
+            description: getWeatherDescription(code)
         };
     } catch (error) {
         console.warn("Failed to fetch weather for point", lat, lng, error);
@@ -53,7 +89,9 @@ const fetchPointWeather = async (lat: number, lng: number): Promise<WeatherData>
 export const fetchRouteWeather = async (
     origin: { lat: number; lng: number },
     destination: { lat: number; lng: number },
-    routePath?: { lat: number; lng: number }[]
+    routePath?: { lat: number; lng: number }[],
+    travelDate?: string,
+    travelTime?: string
 ): Promise<RouteWeather> => {
 
     // Fetch distinct cities along the route
@@ -69,12 +107,12 @@ export const fetchRouteWeather = async (
     }
 
     try {
-        const originWeatherPromise = fetchPointWeather(origin.lat, origin.lng);
-        const destWeatherPromise = fetchPointWeather(destination.lat, destination.lng);
+        const originWeatherPromise = fetchPointWeather(origin.lat, origin.lng, travelDate, travelTime);
+        const destWeatherPromise = fetchPointWeather(destination.lat, destination.lng, travelDate, travelTime);
 
         // Fetch weather for each found city
         const cityWeatherPromises = cityWaypoints.map(async city => {
-            const data = await fetchPointWeather(city.lat, city.lng);
+            const data = await fetchPointWeather(city.lat, city.lng, travelDate, travelTime);
             return { name: city.name, data };
         });
 

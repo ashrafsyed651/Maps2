@@ -6,25 +6,116 @@ interface MapComponentProps {
     routes: Route[];
     selectedRouteId?: string;
     onSelectRoute?: (id: string) => void;
+    isDarkMode?: boolean;
 }
 
 const mapContainerStyle = {
-    height: "400px",
+    height: "100%",
     width: "100%",
-    borderRadius: "0.75rem"
 };
 
-const options = {
+const lightOptions = {
     disableDefaultUI: true,
     zoomControl: true,
     minZoom: 2,
+    styles: []
 };
 
-export function MapComponent({ routes, selectedRouteId, onSelectRoute }: MapComponentProps) {
+const darkOptions = {
+    disableDefaultUI: true,
+    zoomControl: true,
+    minZoom: 2,
+    styles: [
+        { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
+        { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
+        { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
+        {
+            featureType: "administrative.locality",
+            elementType: "labels.text.fill",
+            stylers: [{ color: "#d59563" }],
+        },
+        {
+            featureType: "poi",
+            elementType: "labels.text.fill",
+            stylers: [{ color: "#d59563" }],
+        },
+        {
+            featureType: "poi.park",
+            elementType: "geometry",
+            stylers: [{ color: "#263c3f" }],
+        },
+        {
+            featureType: "poi.park",
+            elementType: "labels.text.fill",
+            stylers: [{ color: "#6b9a76" }],
+        },
+        {
+            featureType: "road",
+            elementType: "geometry",
+            stylers: [{ color: "#38414e" }],
+        },
+        {
+            featureType: "road",
+            elementType: "geometry.stroke",
+            stylers: [{ color: "#212a37" }],
+        },
+        {
+            featureType: "road",
+            elementType: "labels.text.fill",
+            stylers: [{ color: "#9ca5b3" }],
+        },
+        {
+            featureType: "road.highway",
+            elementType: "geometry",
+            stylers: [{ color: "#746855" }],
+        },
+        {
+            featureType: "road.highway",
+            elementType: "geometry.stroke",
+            stylers: [{ color: "#1f2835" }],
+        },
+        {
+            featureType: "road.highway",
+            elementType: "labels.text.fill",
+            stylers: [{ color: "#f3d19c" }],
+        },
+        {
+            featureType: "transit",
+            elementType: "geometry",
+            stylers: [{ color: "#2f3948" }],
+        },
+        {
+            featureType: "transit.station",
+            elementType: "labels.text.fill",
+            stylers: [{ color: "#d59563" }],
+        },
+        {
+            featureType: "water",
+            elementType: "geometry",
+            stylers: [{ color: "#17263c" }],
+        },
+        {
+            featureType: "water",
+            elementType: "labels.text.fill",
+            stylers: [{ color: "#515c6d" }],
+        },
+        {
+            featureType: "water",
+            elementType: "labels.text.stroke",
+            stylers: [{ color: "#17263c" }],
+        },
+    ]
+};
+
+export function MapComponent({ routes, selectedRouteId, onSelectRoute, isDarkMode }: MapComponentProps) {
     const [map, setMap] = useState<google.maps.Map | null>(null);
     const mapRef = useRef<google.maps.Map | null>(null);
     const polylinesRef = useRef<google.maps.Polyline[]>([]);
     const markersRef = useRef<google.maps.Marker[]>([]);
+
+    const options = isDarkMode ? darkOptions : lightOptions;
+
+    // ... (rest of logic remains same, just ensure options is passed correctly)
 
     // Keep track of the map instance
     const onLoad = (map: google.maps.Map) => {
@@ -60,24 +151,26 @@ export function MapComponent({ routes, selectedRouteId, onSelectRoute }: MapComp
         markersRef.current.forEach(m => m.setMap(null));
         markersRef.current = [];
 
-        // 2. DRAW ROUTES (Blue for selected, Gray for others)
+        // 2. DRAW ROUTES (Blue/Cyan for selected, Gray for others)
         routes.forEach(route => {
             if (!route.googleRoute?.overview_path) return;
 
             const isSelected = route.id === selectedRouteId;
-
-            // Robust conversion to LatLngLiteral if needed, though Maps API usually handles the object fine if it's already one.
-            // Using the raw path from googleRoute for efficiency if possible, but the previous code mapped it manually.
             const path = route.googleRoute.overview_path;
+
+            // Adjust colors for dark mode visibility
+            const strokeColor = isSelected
+                ? (isDarkMode ? "#60a5fa" : "#2563eb") // Lighter Blue in dark mode
+                : (isDarkMode ? "#475569" : "#94a3b8"); // Darker gray in dark mode
 
             const polyline = new google.maps.Polyline({
                 path: path,
-                strokeColor: isSelected ? "#2563eb" : "#94a3b8", // Blue : Gray
+                strokeColor: strokeColor,
                 strokeOpacity: isSelected ? 1.0 : 0.6,
                 strokeWeight: isSelected ? 6 : 4,
                 zIndex: isSelected ? 50 : 1,
-                clickable: true, // Enable clicking
-                map: map // Attach to map immediately
+                clickable: true,
+                map: map
             });
 
             // Add click listener
@@ -119,10 +212,10 @@ export function MapComponent({ routes, selectedRouteId, onSelectRoute }: MapComp
             markersRef.current.push(startMarker, endMarker);
         }
 
-    }, [map, routes, selectedRouteId, selectedRoute, onSelectRoute]); // Re-run when routes or selection change
+    }, [map, routes, selectedRouteId, selectedRoute, onSelectRoute, isDarkMode]); // Added isDarkMode dependency
 
     return (
-        <div className="h-[400px] w-full rounded-xl overflow-hidden shadow-lg border-2 border-white z-0 relative">
+        <div className="h-full w-full z-0 relative">
             <GoogleMap
                 mapContainerStyle={mapContainerStyle}
                 zoom={10}

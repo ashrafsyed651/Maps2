@@ -1,7 +1,7 @@
 
 import { useState } from 'react';
 import { useJsApiLoader } from '@react-google-maps/api';
-import { Loader2, Navigation, Sparkles } from 'lucide-react';
+import { Loader2, Navigation, Sparkles, RefreshCw, Moon, Sun } from 'lucide-react';
 import { InputSection } from './components/InputSection';
 import { RouteList } from './components/RouteList';
 import { ProfileSelector } from './components/ProfileSelector';
@@ -22,6 +22,10 @@ function App() {
     const [routes, setRoutes] = useState<Route[]>([]);
     const [selectedProfile, setSelectedProfile] = useState<DrivingProfile>(PROFILES[1]);
     const [selectedRouteId, setSelectedRouteId] = useState<string | undefined>();
+    const [travelTime, setTravelTime] = useState<string>("20:00");
+    const [travelDate, setTravelDate] = useState<string>(new Date().toISOString().split('T')[0]);
+    const [isDarkMode, setIsDarkMode] = useState(false);
+    const [isSyncingTime, setIsSyncingTime] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -41,7 +45,9 @@ function App() {
 
             const fetchedRoutes = await fetchRoutes(
                 { lat: sourceLoc.lat, lon: sourceLoc.lon },
-                { lat: destLoc.lat, lon: destLoc.lon }
+                { lat: destLoc.lat, lon: destLoc.lon },
+                travelTime,
+                travelDate
             );
 
             const enrichedRoutes = fetchedRoutes.map(r => ({
@@ -50,7 +56,7 @@ function App() {
                 destination: destLoc.display_name
             }));
 
-            const ranked = rankRoutes(enrichedRoutes, selectedProfile);
+            const ranked = rankRoutes(enrichedRoutes, selectedProfile, travelTime);
             setRoutes(ranked);
             setSelectedRouteId(ranked[0]?.id);
         } catch (err: any) {
@@ -65,19 +71,53 @@ function App() {
         if (profile) {
             setSelectedProfile(profile);
             if (routes.length > 0) {
-                const ranked = rankRoutes(routes, profile);
+                const ranked = rankRoutes(routes, profile, travelTime);
                 setRoutes(ranked);
                 setSelectedRouteId(ranked[0]?.id);
             }
         }
     };
 
+    const handleTimeChange = (time: string) => {
+        setTravelTime(time);
+        if (routes.length > 0) {
+            const ranked = rankRoutes(routes, selectedProfile, time);
+            setRoutes(ranked);
+            setSelectedRouteId(ranked[0]?.id);
+        }
+    };
+
+    const handleDateChange = (date: string) => {
+        setTravelDate(date);
+    };
+
+    const fetchNetworkTime = async () => {
+        setIsSyncingTime(true);
+        try {
+            const response = await fetch('https://worldtimeapi.org/api/ip');
+            const data = await response.json();
+            if (data.datetime) {
+                const dateObj = new Date(data.datetime);
+                const hours = dateObj.getHours().toString().padStart(2, '0');
+                const minutes = dateObj.getMinutes().toString().padStart(2, '0');
+                const dateStr = dateObj.toISOString().split('T')[0];
+
+                handleTimeChange(`${hours}:${minutes}`);
+                handleDateChange(dateStr);
+            }
+        } catch (error) {
+            console.error("Failed to fetch time", error);
+        } finally {
+            setIsSyncingTime(false);
+        }
+    };
+
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex flex-col md:flex-row">
+        <div className="relative h-screen w-screen overflow-hidden bg-slate-50">
             {/* Sidebar */}
-            <div className="w-full md:w-[420px] h-screen overflow-y-auto bg-white/80 backdrop-blur-xl border-r border-gray-200/50 p-6 shadow-2xl z-20">
+            <div className={`absolute left-0 top-0 h-full w-full md:w-[420px] overflow-y-auto bg-white/90 dark:bg-slate-900/95 backdrop-blur-xl border-r border-gray-200/50 dark:border-slate-800 p-6 shadow-2xl z-20 transition-colors duration-300 ${isDarkMode ? 'dark' : ''}`}>
                 {/* Header */}
-                <div className="mb-8">
+                <div className="mb-8 flex justify-between items-start">
                     <div className="flex items-center gap-3 mb-2">
                         <div className="bg-gradient-to-br from-blue-600 to-indigo-600 p-2.5 rounded-2xl shadow-lg">
                             <Navigation className="text-white" size={26} />
@@ -86,17 +126,62 @@ function App() {
                             <h1 className="text-3xl font-black bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent tracking-tight">
                                 SmartDrive
                             </h1>
-                            <p className="text-xs text-gray-500 font-medium">Intelligent Route Planning</p>
+                            <p className="text-xs text-gray-500 font-medium dark:text-gray-400">Intelligent Route Planning</p>
                         </div>
                     </div>
+
+                    {/* Dark Mode Toggle */}
+                    <button
+                        onClick={() => setIsDarkMode(!isDarkMode)}
+                        className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                        aria-label="Toggle Dark Mode"
+                    >
+                        {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
+                    </button>
                 </div>
 
                 <div className="space-y-6">
                     <section>
                         <div className="flex items-center gap-2 mb-4">
                             <Sparkles size={16} className="text-blue-600" />
-                            <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wider">Plan Your Trip</h2>
+                            <h2 className="text-sm font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Plan Your Trip</h2>
                         </div>
+
+                        {/* Time & Date Input */}
+                        <div className="mb-4 bg-white dark:bg-slate-800 p-3 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm space-y-3 transition-colors duration-300">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5 flex justify-between items-center">
+                                    <span>Travel Date</span>
+                                    <button
+                                        onClick={fetchNetworkTime}
+                                        disabled={isSyncingTime}
+                                        className="flex items-center gap-1 text-[10px] text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 px-2 py-0.5 rounded-full transition-colors"
+                                    >
+                                        <RefreshCw size={10} className={isSyncingTime ? "animate-spin" : ""} />
+                                        {isSyncingTime ? "Syncing..." : "Sync Live"}
+                                    </button>
+                                </label>
+                                <input
+                                    type="date"
+                                    value={travelDate}
+                                    onChange={(e) => handleDateChange(e.target.value)}
+                                    className="w-full p-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">
+                                    Travel Time
+                                </label>
+                                <input
+                                    type="time"
+                                    value={travelTime}
+                                    onChange={(e) => handleTimeChange(e.target.value)}
+                                    className="w-full p-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                                />
+                            </div>
+                        </div>
+
                         <InputSection onSearch={handleSearch} isLoading={isLoading} />
                     </section>
 
@@ -127,6 +212,7 @@ function App() {
                                     selectedProfile={selectedProfile}
                                     selectedRouteId={selectedRouteId}
                                     onSelectRoute={setSelectedRouteId}
+                                    travelTime={travelTime}
                                 />
                             </section>
                         </>
@@ -135,12 +221,13 @@ function App() {
             </div>
 
             {/* Main Content (Map) */}
-            <div className="flex-1 relative h-[50vh] md:h-screen">
+            <div className="absolute inset-0 z-0">
                 {isLoaded ? (
                     <MapComponent
                         routes={routes}
                         selectedRouteId={selectedRouteId}
                         onSelectRoute={setSelectedRouteId}
+                        isDarkMode={isDarkMode}
                     />
                 ) : (
                     <div className="h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 gap-4">
