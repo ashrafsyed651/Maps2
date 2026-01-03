@@ -267,3 +267,34 @@ export const findCitiesAlongRoute = async (path: LatLng[]): Promise<CityResult[]
         return [];
     }
 };
+
+/**
+ * Reverse geocodes coordinates to an address using OpenStreetMap (Nominatim)
+ */
+export const reverseGeocodeOSM = async (lat: number, lon: number): Promise<string | null> => {
+    try {
+        const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`;
+
+        const response = await fetch(url, {
+            headers: {
+                'User-Agent': 'SmartDrive-App/1.0'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`Nominatim API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (data && data.display_name) {
+            return data.display_name;
+        }
+
+        return null;
+    } catch (error) {
+        console.error("Reverse geocoding failed:", error);
+        return null;
+    }
+};
+
